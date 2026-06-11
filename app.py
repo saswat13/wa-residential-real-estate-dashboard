@@ -4,6 +4,7 @@ import streamlit as st
 import math
 import requests
 import plotly.graph_objects as go
+import streamlit.components.v1 as components
 
 from data_sources import (
     load_redfin_cached,
@@ -526,6 +527,23 @@ def add_derived_metrics(input_df: pd.DataFrame, date_col: str, region_col: str) 
 
 available_metrics = [c for c in numeric_candidates if c in df.columns]
 
+pending_market = st.session_state.pop("_pending_market_navigation", None)
+if pending_market:
+    overview_market_key = f"market_pulse_market_{level}"
+    price_markets_key = f"price_markets_{level}"
+    st.session_state["market_pulse_search"] = ""
+    st.session_state[overview_market_key] = pending_market
+
+    existing_price_markets = list(st.session_state.get(price_markets_key, []))
+    if pending_market not in existing_price_markets:
+        existing_price_markets.append(pending_market)
+    st.session_state[price_markets_key] = existing_price_markets[-5:]
+
+    pending_property_type = st.session_state.pop("_pending_property_type", None)
+    if pending_property_type:
+        st.session_state[f"price_property_type_{level}"] = pending_property_type
+    st.session_state["_activate_dashboard_tab"] = "Overview"
+
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
         "Overview",
@@ -536,6 +554,29 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         "Opportunity Finder",
     ]
 )
+
+tab_to_activate = st.session_state.pop("_activate_dashboard_tab", None)
+if tab_to_activate:
+    components.html(
+        f"""
+        <script>
+        const target = {tab_to_activate!r};
+        let attempts = 0;
+        const activateTab = () => {{
+            const tabs = Array.from(parent.document.querySelectorAll('[role="tab"]'));
+            const match = tabs.find((tab) => tab.textContent.trim() === target);
+            if (match) {{
+                match.click();
+                return;
+            }}
+            attempts += 1;
+            if (attempts < 20) setTimeout(activateTab, 100);
+        }};
+        setTimeout(activateTab, 50);
+        </script>
+        """,
+        height=0,
+    )
 
 def calculate_period_change(history_df: pd.DataFrame, metric: str, date_col: str):
     """
@@ -609,12 +650,26 @@ with tab1:
         )
 
         with market_col:
-            selected_market = st.selectbox(
-                "Market",
-                market_options,
-                index=default_market_index,
-                key=f"market_pulse_market_{search_text}_{level}",
-            )
+            overview_market_key = f"market_pulse_market_{level}"
+            if (
+                overview_market_key in st.session_state
+                and st.session_state[overview_market_key] not in market_options
+            ):
+                del st.session_state[overview_market_key]
+            if overview_market_key in st.session_state:
+                selected_market = st.selectbox(
+                    "Market",
+                    market_options,
+                    index=None,
+                    key=overview_market_key,
+                )
+            else:
+                selected_market = st.selectbox(
+                    "Market",
+                    market_options,
+                    index=default_market_index,
+                    key=overview_market_key,
+                )
 
         market_latest_all_types = search_results[
             search_results[region_col] == selected_market
@@ -1001,19 +1056,38 @@ with tab2:
             )
 
         with property_col:
-            selected_property_type = st.selectbox(
-                "Property type",
-                property_types,
-                index=default_property_index,
-                key=f"price_property_type_{level}",
-            ) if property_types else None
+            price_property_key = f"price_property_type_{level}"
+            if property_types and price_property_key in st.session_state:
+                selected_property_type = st.selectbox(
+                    "Property type",
+                    property_types,
+                    index=None,
+                    key=price_property_key,
+                )
+            elif property_types:
+                selected_property_type = st.selectbox(
+                    "Property type",
+                    property_types,
+                    index=default_property_index,
+                    key=price_property_key,
+                )
+            else:
+                selected_property_type = None
+
+        price_markets_key = f"price_markets_{level}"
+        if price_markets_key not in st.session_state:
+            st.session_state[price_markets_key] = default_markets
+        else:
+            st.session_state[price_markets_key] = [
+                market for market in st.session_state[price_markets_key]
+                if market in all_markets
+            ][-5:]
 
         selected_markets = st.multiselect(
             "Markets to compare",
             all_markets,
-            default=default_markets,
             max_selections=5,
-            key=f"price_markets_{level}",
+            key=price_markets_key,
             help="Type to search, then select up to five markets.",
         )
 
@@ -2229,6 +2303,15 @@ with tab6:
 
         st.subheader("Opportunity read")
         st.info(lead_read)
+        if st.button(
+            f"Open top opportunity: {leader[region_col]}",
+            type="primary",
+            use_container_width=True,
+            key=f"open_top_opportunity_{level}_{finder_goal}",
+        ):
+            st.session_state["_pending_market_navigation"] = leader[region_col]
+            st.session_state["_pending_property_type"] = finder_property
+            st.rerun()
 
         chart_title = "Best markets for buyers" if buyer_mode else "Strongest markets for sellers"
         opportunity_chart = px.bar(
@@ -2301,10 +2384,13 @@ with tab6:
         display_df["Homes Sold"] = display_df["Homes Sold"].map(
             lambda value: f"{value:,.0f}" if pd.notna(value) else "N/A"
         )
-        st.dataframe(
+        opportunity_selection = st.dataframe(
             display_df,
             use_container_width=True,
             hide_index=True,
+            key=f"opportunity_results_{level}_{finder_goal}_{finder_property}",
+            on_select="rerun",
+            selection_mode="single-row",
             column_config={
                 "Rank": st.column_config.NumberColumn(width="small"),
                 "Market": st.column_config.TextColumn(width="medium"),
@@ -2317,6 +2403,26 @@ with tab6:
                 "Why it ranks": st.column_config.TextColumn(width="large"),
             },
         )
+
+        selected_opportunity_rows = opportunity_selection.selection.rows
+        if selected_opportunity_rows:
+            selected_opportunity_index = selected_opportunity_rows[0]
+            selected_opportunity_market = display_df.iloc[selected_opportunity_index]["Market"]
+            st.caption(
+                f"Selected: **{selected_opportunity_market}**. Opening it will also add the market "
+                "to the Price Trends comparison."
+            )
+            if st.button(
+                "Open selected market",
+                type="primary",
+                use_container_width=True,
+                key=f"open_opportunity_{level}_{finder_goal}",
+            ):
+                st.session_state["_pending_market_navigation"] = selected_opportunity_market
+                st.session_state["_pending_property_type"] = finder_property
+                st.rerun()
+        else:
+            st.caption("Select a row to open that market in Overview and add it to Price Trends.")
 
         with st.expander("How opportunities are ranked"):
             if buyer_mode:
