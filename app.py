@@ -5,11 +5,9 @@ import math
 import requests
 import plotly.graph_objects as go
 
-from config import FRED_SERIES
 from data_sources import (
     load_redfin_cached,
     refresh_redfin_cache,
-    load_fred_series,
     detect_date_col,
     detect_region_col,
     parquet_path_for_level,
@@ -18,38 +16,106 @@ from market_signals import add_market_signal
 
 
 st.set_page_config(
-    page_title="WA Residential Real Estate Dashboard",
+    page_title="Washington Housing Market",
+    page_icon=":material/home_work:",
     layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-st.title("Washington Residential Real Estate Dashboard")
-st.caption("Free-data MVP using Redfin + FRED/Realtor.com-style housing inventory series.")
+st.markdown(
+    """
+    <style>
+    :root {
+        --wa-navy: #123047;
+        --wa-evergreen: #28735a;
+        --wa-mist: #f3f7f5;
+        --wa-slate: #52616b;
+        --wa-coral: #d96c5f;
+    }
+    .stApp { background: #fbfcfb; }
+    .block-container { max-width: 1240px; padding-top: 1.6rem; padding-bottom: 3rem; }
+    [data-testid="stSidebar"] { background: #f3f6f5; border-right: 1px solid #e1e8e4; }
+    [data-testid="stSidebar"] h2 { color: var(--wa-navy); }
+    h1, h2, h3 { color: var(--wa-navy); letter-spacing: -0.02em; }
+    .dashboard-header {
+        padding: 1.45rem 1.6rem;
+        border-radius: 18px;
+        color: white;
+        background: linear-gradient(120deg, #123047 0%, #1e5260 55%, #28735a 100%);
+        box-shadow: 0 12px 30px rgba(18, 48, 71, 0.14);
+        margin-bottom: 1.15rem;
+    }
+    .dashboard-eyebrow { font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; opacity: .76; }
+    .dashboard-title { font-size: 2rem; font-weight: 760; line-height: 1.15; margin: .35rem 0; }
+    .dashboard-subtitle { font-size: .98rem; opacity: .84; margin: 0; }
+    .section-kicker { color: var(--wa-evergreen); font-size: .78rem; font-weight: 750; letter-spacing: .1em; text-transform: uppercase; }
+    .market-heading { font-size: 1.55rem; font-weight: 750; color: var(--wa-navy); margin: .2rem 0 0; }
+    .market-meta { color: var(--wa-slate); font-size: .9rem; margin-bottom: .8rem; }
+    .insight-card {
+        border: 1px solid #dfe8e3;
+        background: white;
+        border-radius: 14px;
+        padding: 1rem 1.1rem;
+        min-height: 116px;
+        box-shadow: 0 4px 16px rgba(18, 48, 71, 0.05);
+    }
+    .insight-label { color: var(--wa-slate); font-size: .76rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+    .insight-value { color: var(--wa-navy); font-size: 1.7rem; font-weight: 760; margin: .3rem 0 .1rem; }
+    .insight-detail { color: var(--wa-slate); font-size: .82rem; }
+    .market-badge { display: inline-block; border-radius: 999px; padding: .35rem .7rem; font-size: .8rem; font-weight: 750; }
+    .badge-buyer { background: #e6f1f8; color: #246083; }
+    .badge-seller { background: #fae9e6; color: #a7493e; }
+    .badge-balanced { background: #e5f2eb; color: #25634d; }
+    [data-testid="stMetric"] {
+        background: white;
+        border: 1px solid #dfe8e3;
+        border-radius: 14px;
+        padding: .9rem 1rem;
+        box-shadow: 0 4px 16px rgba(18, 48, 71, 0.04);
+    }
+    [data-testid="stMetricLabel"] { color: var(--wa-slate); }
+    [data-testid="stMetricValue"] { color: var(--wa-navy); }
+    .stTabs [data-baseweb="tab-list"] { gap: .35rem; border-bottom: 1px solid #dfe8e3; }
+    .stTabs [data-baseweb="tab"] { padding: .7rem .85rem; border-radius: 9px 9px 0 0; }
+    .stTabs [aria-selected="true"] { color: var(--wa-evergreen); background: #edf5f1; }
+    [data-baseweb="tag"] { background-color: var(--wa-evergreen) !important; }
+    div[data-testid="stPlotlyChart"] { border: 1px solid #e2e9e5; border-radius: 14px; overflow: hidden; background: white; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    """
+    <div class="dashboard-header">
+        <div class="dashboard-eyebrow">Washington housing intelligence</div>
+        <div class="dashboard-title">Residential Real Estate Dashboard</div>
+        <p class="dashboard-subtitle">Track pricing, supply, competition, and buyer leverage across Washington markets.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 with st.sidebar:
-    st.header("Controls")
-    level = st.selectbox("Geography level", ["state", "county", "city", "zip"], index=1)
-    max_rows = st.slider("Max rows after filtering", 1000, 200000, 50000, step=1000)
-    st.caption("ZIP-level can be large and slower.")
+    st.header("Explore markets")
+    level = st.selectbox(
+        "Geography",
+        ["state", "county", "city", "zip"],
+        index=1,
+        format_func=lambda value: value.title(),
+    )
 
-
-
-@st.cache_data(ttl=60 * 60 * 6, show_spinner=True)
-def get_fred(series_id: str) -> pd.DataFrame:
-    return load_fred_series(series_id)
 
 
 with st.sidebar:
-    st.divider()
-    st.subheader("Data Cache")
-
-    cache_path = parquet_path_for_level(level)
-
-    if cache_path.exists():
-        st.caption(f"Cache found: {cache_path}")
-    else:
-        st.caption("No local cache found.")
-
-    refresh_clicked = st.button(f"Refresh {level} data")
+    with st.expander("Data & settings"):
+        cache_path = parquet_path_for_level(level)
+        if cache_path.exists():
+            st.caption(f"Local {level} data is available.")
+        else:
+            st.caption(f"No local {level} data found.")
+        refresh_clicked = st.button(f"Refresh {level} data", use_container_width=True)
+        st.caption("Refresh downloads the latest available public Redfin dataset.")
 
 if refresh_clicked:
     with st.spinner(f"Downloading and caching {level} data. This may take a while..."):
@@ -61,10 +127,6 @@ if refresh_clicked:
             st.error(f"Refresh failed: {exc}")
             st.stop()
 
-
-@st.cache_data(ttl=60 * 60 * 6, show_spinner=False)
-def get_cached_redfin(level: str) -> pd.DataFrame:
-    return load_redfin_cached(level)
 
 @st.cache_data(ttl=60 * 60 * 6, show_spinner=False)
 def get_cached_redfin(level: str) -> pd.DataFrame:
@@ -196,11 +258,8 @@ raw_df = raw_df.dropna(subset=[date_col]).sort_values(date_col)
 raw_df = add_derived_metrics(raw_df, date_col, region_col)
 
 with st.sidebar:
-    st.divider()
-    st.subheader("Time Period")
-
     period_option = st.selectbox(
-        "Data period",
+        "Time period",
         [
             "Last 12 months",
             "Last 2 years",
@@ -226,7 +285,7 @@ else:
     start_date = latest_available_date - pd.DateOffset(months=months_back)
     df = raw_df[raw_df[date_col] >= start_date].copy()
 
-df = df.tail(max_rows).copy()
+df = df.tail(50000).copy()
 
 
 
@@ -458,10 +517,10 @@ available_metrics = [c for c in numeric_candidates if c in df.columns]
 
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
-        "Market Pulse",
+        "Overview",
         "Price Trends",
         "Supply / Demand",
-        "Buyer vs Seller Power",
+        "Market Power",
         "County Map",
         "Opportunity Finder",
     ]
@@ -492,8 +551,9 @@ def calculate_period_change(history_df: pd.DataFrame, metric: str, date_col: str
 
 
 with tab1:
-    st.subheader("Market Pulse")
-    st.caption("What is happening right now?")
+    st.markdown('<div class="section-kicker">Market overview</div>', unsafe_allow_html=True)
+    st.subheader("What is happening now?")
+    st.caption("Choose a market to see its latest conditions and direction of travel.")
 
     latest_date = df[date_col].max()
     latest = df[df[date_col] == latest_date].copy()
@@ -506,11 +566,13 @@ with tab1:
     "state": "Example: Washington",
     }.get(level, "Search market")
 
-    search_text = st.text_input(
-        f"Search {level}",
-        placeholder=search_placeholder,
-        key="market_pulse_search",
-    ).strip()
+    search_col, market_col = st.columns([1, 1.35])
+    with search_col:
+        search_text = st.text_input(
+            f"Search {level}",
+            placeholder=search_placeholder,
+            key="market_pulse_search",
+        ).strip()
 
     if search_text:
         search_results = latest[
@@ -524,11 +586,24 @@ with tab1:
     else:
         market_options = sorted(search_results[region_col].dropna().unique().tolist())
 
-        selected_market = st.selectbox(
-            "Select market",
-            market_options,
-            key=f"market_pulse_market_{search_text}_{level}",
+        preferred_market = {
+            "county": "King County, WA",
+            "city": "Seattle, WA",
+            "state": "Washington",
+        }.get(level)
+        default_market_index = (
+            market_options.index(preferred_market)
+            if preferred_market in market_options
+            else 0
         )
+
+        with market_col:
+            selected_market = st.selectbox(
+                "Market",
+                market_options,
+                index=default_market_index,
+                key=f"market_pulse_market_{search_text}_{level}",
+            )
 
         market_latest_all_types = search_results[
             search_results[region_col] == selected_market
@@ -550,7 +625,7 @@ with tab1:
             )
 
             selected_property_type = st.selectbox(
-                "Select property type",
+                "Property type",
                 property_types,
                 index=default_property_index,
                 key=f"market_pulse_property_{selected_market}_{search_text}_{level}",
@@ -572,8 +647,21 @@ with tab1:
             if selected_property_type:
                 title += f" — {selected_property_type}"
 
-            st.divider()
-            st.subheader(title)
+            title = selected_market + (
+                f" - {selected_property_type}" if selected_property_type else ""
+            )
+            market_power = row.get("market_power")
+            badge_class = {
+                "Buyer advantage": "badge-buyer",
+                "Seller advantage": "badge-seller",
+                "Balanced": "badge-balanced",
+            }.get(market_power, "badge-balanced")
+            st.markdown(
+                f'<div class="market-heading">{title}</div>'
+                f'<div class="market-meta">Latest data: {latest_date:%B %Y} &nbsp; '
+                f'<span class="market-badge {badge_class}">{market_power or "Unknown"}</span></div>',
+                unsafe_allow_html=True,
+            )
             
             market_history = df[df[region_col].astype(str) == selected_market].copy()
 
@@ -605,8 +693,6 @@ with tab1:
             current_price = row.get("median_sale_price")
             price_yoy = row.get("median_sale_price_yoy_calc")
             price_mom = row.get("median_sale_price_mom_calc")
-            market_power = row.get("market_power")
-
             if pd.notna(current_price):
                 c1.metric(
                     "Median Sale Price",
@@ -671,8 +757,7 @@ with tab1:
 
             c8.metric("Market Power", market_power if pd.notna(market_power) else "Unknown")
 
-            st.divider()
-            st.subheader("Quick Read")
+            st.markdown("### Market read")
 
             quick_read_parts = []
 
@@ -753,12 +838,11 @@ with tab1:
                 )
 
             if quick_read_parts:
-                st.write(" ".join(quick_read_parts))
+                st.info(" ".join(quick_read_parts))
             else:
                 st.write("Not enough clean data to generate a useful read.")
                         
-            st.divider()
-            st.subheader("Trend Line")
+            st.markdown("### Trend dashboard")
 
             
             
@@ -782,6 +866,7 @@ with tab1:
                 trend_metric_options,
                 index=0,
                 key=f"market_pulse_trend_{selected_market}_{selected_property_type}_{level}",
+                format_func=lambda value: value.replace("_calc", "").replace("_", " ").title(),
             )
 
             market_history[selected_trend_metric] = pd.to_numeric(
@@ -793,10 +878,49 @@ with tab1:
                 market_history.sort_values(date_col),
                 x=date_col,
                 y=selected_trend_metric,
-                title=f"{selected_trend_metric.replace('_', ' ').title()} — {title}",
+                title=selected_trend_metric.replace("_calc", "").replace("_", " ").title(),
+                color_discrete_sequence=["#28735a"],
             )
+            fig.update_traces(line_width=3)
+            fig.update_layout(
+                height=390,
+                plot_bgcolor="white",
+                paper_bgcolor="white",
+                margin=dict(l=20, r=20, t=55, b=20),
+                xaxis_title=None,
+                yaxis_title=None,
+                hovermode="x unified",
+            )
+            fig.update_xaxes(showgrid=False)
+            fig.update_yaxes(gridcolor="#e8eeeb")
 
-            st.plotly_chart(fig, use_container_width=True)
+            chart_col, context_col = st.columns([1.65, 1])
+            with chart_col:
+                st.plotly_chart(fig, use_container_width=True)
+
+            with context_col:
+                context_metric = "inventory" if "inventory" in market_history.columns else "median_dom"
+                context_title = "Inventory" if context_metric == "inventory" else "Days on Market"
+                context_fig = px.area(
+                    market_history.sort_values(date_col),
+                    x=date_col,
+                    y=context_metric,
+                    title=context_title,
+                    color_discrete_sequence=["#4f7f96"],
+                )
+                context_fig.update_traces(line_width=2.5, fillcolor="rgba(79, 127, 150, 0.16)")
+                context_fig.update_layout(
+                    height=390,
+                    plot_bgcolor="white",
+                    paper_bgcolor="white",
+                    margin=dict(l=20, r=20, t=55, b=20),
+                    xaxis_title=None,
+                    yaxis_title=None,
+                    hovermode="x unified",
+                )
+                context_fig.update_xaxes(showgrid=False)
+                context_fig.update_yaxes(gridcolor="#e8eeeb")
+                st.plotly_chart(context_fig, use_container_width=True)
 
             with st.expander("Selected latest row"):
                 show_cols = [
@@ -826,120 +950,70 @@ with tab1:
                 )
 with tab2:
     st.subheader("Price Trends")
+    st.caption("Compare price movement across up to five Washington markets.")
 
     if not available_metrics:
         st.warning("Expected Redfin metric columns were not found.")
     else:
-        metric = st.selectbox(
-            "Metric",
-            available_metrics,
-            index=available_metrics.index("median_sale_price")
-            if "median_sale_price" in available_metrics
-            else 0,
-            key="price_metric",
-        )
-
         all_markets = sorted(df[region_col].dropna().astype(str).unique().tolist())
 
-        if "price_selected_markets_persistent" not in st.session_state:
-            st.session_state.price_selected_markets_persistent = []
+        preferred_market_names = {
+            "state": ["Washington"],
+            "county": ["King County, WA", "Pierce County, WA", "Snohomish County, WA"],
+            "city": ["Seattle, WA", "Bellevue, WA", "Tacoma, WA"],
+        }.get(level, [])
+        default_markets = [market for market in preferred_market_names if market in all_markets]
+        if not default_markets:
+            default_markets = all_markets[: min(3, len(all_markets))]
 
-            price_search_placeholder = {
-                "county": "Example: King, Pierce, Snohomish",
-                "city": "Example: Seattle, Bellevue, Redmond",
-                 "zip": "Example: 98052, 98004, 98101",
-                 "state": "Example: Washington",
-    }.get(level, "Search market")
-
-            
-        price_search_placeholder = {
-                "county": "Example: King, Pierce, Snohomish",
-                "city": "Example: Seattle, Bellevue, Redmond",
-                "zip": "Example: 98052, 98004, 98101",
-                "state": "Example: Washington",
-                }.get(level, "Search market")
-
-        market_search = st.text_input(
-            "Search market to add",
-            placeholder=price_search_placeholder,
-            key="price_market_search",
-        ).strip()
-        if market_search:
-            search_matches = [
-                m for m in all_markets
-                if market_search.lower() in m.lower()
-            ]
-        else:
-            search_matches = []
-
-        market_to_add = st.selectbox(
-            "Matching markets",
-            [""] + search_matches,
-            key=f"price_market_to_add_{level}_{market_search}",
+        property_types = (
+            sorted(df["property_type"].dropna().astype(str).unique().tolist())
+            if "property_type" in df.columns
+            else []
+        )
+        default_property_index = (
+            property_types.index("All Residential")
+            if "All Residential" in property_types
+            else 0
         )
 
-        c_add, c_clear = st.columns([1, 1])
-
-        with c_add:
-            if st.button("Add market", key="price_add_market"):
-                if (
-                    market_to_add
-                    and market_to_add not in st.session_state.price_selected_markets_persistent
-                ):
-                    st.session_state.price_selected_markets_persistent.append(market_to_add)
-
-        with c_clear:
-            if st.button("Clear markets", key="price_clear_markets"):
-                st.session_state.price_selected_markets_persistent = []
-
-        selected_markets = st.session_state.price_selected_markets_persistent
-
-        if selected_markets:
-            selected_markets_after_removal = st.multiselect(
-                "Markets currently in chart",
-                selected_markets,
-                default=selected_markets,
-                key="price_markets_currently_in_chart",
+        metric_col, property_col = st.columns([1, 1])
+        with metric_col:
+            metric = st.selectbox(
+                "Price metric",
+                available_metrics,
+                index=available_metrics.index("median_sale_price")
+                if "median_sale_price" in available_metrics
+                else 0,
+                key="price_metric",
+                format_func=lambda value: value.replace("_", " ").title(),
             )
 
-            st.session_state.price_selected_markets_persistent = selected_markets_after_removal
-            selected_markets = selected_markets_after_removal
+        with property_col:
+            selected_property_type = st.selectbox(
+                "Property type",
+                property_types,
+                index=default_property_index,
+                key=f"price_property_type_{level}",
+            ) if property_types else None
+
+        selected_markets = st.multiselect(
+            "Markets to compare",
+            all_markets,
+            default=default_markets,
+            max_selections=5,
+            key=f"price_markets_{level}",
+            help="Type to search, then select up to five markets.",
+        )
 
         if not selected_markets:
-            st.info("Search and add at least one market to display a trend.")
+            st.info("Select at least one market to display a trend.")
         else:
             plot_df = df[df[region_col].astype(str).isin(selected_markets)].copy()
-
-            selected_property_type = None
-
-            if "property_type" in plot_df.columns:
-                property_types = sorted(
-                    plot_df["property_type"]
-                    .dropna()
-                    .astype(str)
-                    .unique()
-                    .tolist()
-                )
-
-                if "All Residential" in property_types:
-                    selected_property_type = "All Residential"
-                    plot_df = plot_df[
-                        plot_df["property_type"].astype(str) == selected_property_type
-                    ].copy()
-                    st.caption("Using property type: All Residential")
-                elif property_types:
-                    selected_property_type = st.selectbox(
-                        "Property type",
-                        property_types,
-                        index=0,
-                        key=f"price_property_type_{level}_{len(selected_markets)}",
-                    )
-
-                    plot_df = plot_df[
-                        plot_df["property_type"].astype(str) == selected_property_type
-                    ].copy()
-                else:
-                    st.warning("No property type values found for selected markets.")
+            if selected_property_type and "property_type" in plot_df.columns:
+                plot_df = plot_df[
+                    plot_df["property_type"].astype(str) == selected_property_type
+                ].copy()
 
             if plot_df.empty:
                 st.warning("No data available for the selected markets after filtering.")
@@ -955,12 +1029,148 @@ with tab2:
                         f"{metric.replace('_', ' ').title()}"
                         + (f" — {selected_property_type}" if selected_property_type else "")
                     ),
+                    color_discrete_sequence=["#28735a", "#4f7f96", "#d08b49", "#8b6a9e", "#d96c5f"],
                 )
+                fig.update_traces(line_width=2.8)
+                fig.update_layout(
+                    height=500,
+                    plot_bgcolor="white",
+                    paper_bgcolor="white",
+                    margin=dict(l=20, r=20, t=65, b=20),
+                    xaxis_title=None,
+                    yaxis_title=None,
+                    legend_title_text="Market",
+                    hovermode="x unified",
+                )
+                fig.update_xaxes(showgrid=False)
+                fig.update_yaxes(gridcolor="#e8eeeb")
 
                 st.plotly_chart(fig, use_container_width=True)
 
-                st.divider()
-                st.subheader("Selected Latest Rows")
+                market_summaries = []
+                for market_name in selected_markets:
+                    market_data = plot_df[
+                        plot_df[region_col].astype(str) == str(market_name)
+                    ].copy()
+                    history = market_data[[date_col, metric]].dropna().sort_values(date_col)
+                    if history.empty:
+                        market_summaries.append(
+                            {
+                                "market": market_name,
+                                "latest": None,
+                                "change": None,
+                                "latest_date": None,
+                            }
+                        )
+                        continue
+
+                    first_value = history.iloc[0][metric]
+                    latest_value = history.iloc[-1][metric]
+                    period_change = None
+                    if pd.notna(first_value) and first_value != 0 and len(history) > 1:
+                        period_change = (latest_value - first_value) / first_value
+
+                    market_summaries.append(
+                        {
+                            "market": market_name,
+                            "latest": latest_value,
+                            "change": period_change,
+                            "latest_date": history.iloc[-1][date_col],
+                        }
+                    )
+
+                if market_summaries:
+                    summary_df = pd.DataFrame(market_summaries)
+                    metric_label = metric.replace("_", " ").title()
+
+                    def format_metric_value(value):
+                        if pd.isna(value):
+                            return "N/A"
+                        if metric in ["median_sale_price", "median_list_price"]:
+                            return f"${value:,.0f}"
+                        if metric == "median_ppsf":
+                            return f"${value:,.0f}/sq ft"
+                        if metric in ["avg_sale_to_list", "sold_above_list", "price_drops"]:
+                            return f"{value:.1%}"
+                        if metric == "months_of_supply":
+                            return f"{value:.1f}"
+                        return f"{value:,.0f}"
+
+                    st.subheader("Market read")
+                    available_summary = summary_df.dropna(subset=["latest"]).copy()
+                    missing_summary = summary_df[summary_df["latest"].isna()].copy()
+
+                    if available_summary.empty:
+                        st.warning("None of the selected markets has usable data for this metric and property type.")
+                    else:
+                        available_summary["value_rank"] = available_summary["latest"].rank(
+                            method="min",
+                            ascending=False,
+                        ).astype(int)
+                        peer_median = available_summary["latest"].median()
+                        latest_leader = available_summary.loc[available_summary["latest"].idxmax()]
+                        overview_parts = [
+                            f"{latest_leader['market']} has the highest current {metric_label.lower()} "
+                            f"at {format_metric_value(latest_leader['latest'])}."
+                        ]
+
+                        change_df = available_summary.dropna(subset=["change"])
+                        if len(change_df) > 1:
+                            strongest = change_df.loc[change_df["change"].idxmax()]
+                            weakest = change_df.loc[change_df["change"].idxmin()]
+                            change_spread = strongest["change"] - weakest["change"]
+                            overview_parts.append(
+                                f"Movement ranges from {strongest['change']:+.1%} in {strongest['market']} "
+                                f"to {weakest['change']:+.1%} in {weakest['market']}."
+                            )
+                            overview_parts.append(
+                                "The markets are moving similarly."
+                                if change_spread < 0.05
+                                else f"The {change_spread:.1%} gap indicates meaningful divergence."
+                            )
+
+                        st.info(" ".join(overview_parts))
+
+                        st.markdown("**How each selected market compares**")
+                        market_read_lines = []
+                        for _, market_row in available_summary.sort_values("value_rank").iterrows():
+                            relative_gap = (
+                                (market_row["latest"] - peer_median) / peer_median
+                                if pd.notna(peer_median) and peer_median != 0
+                                else None
+                            )
+                            relative_text = "at the selected-market median"
+                            if relative_gap is not None and abs(relative_gap) >= 0.005:
+                                relative_text = (
+                                    f"{abs(relative_gap):.1%} above the selected-market median"
+                                    if relative_gap > 0
+                                    else f"{abs(relative_gap):.1%} below the selected-market median"
+                                )
+
+                            change_text = "change unavailable"
+                            if pd.notna(market_row["change"]):
+                                if abs(market_row["change"]) < 0.005:
+                                    change_text = "roughly flat over the selected period"
+                                else:
+                                    direction = "up" if market_row["change"] > 0 else "down"
+                                    change_text = f"{direction} {abs(market_row['change']):.1%} over the selected period"
+
+                            market_read_lines.append(
+                                f"- **{market_row['market']}**: {format_metric_value(market_row['latest'])} "
+                                f"(rank {market_row['value_rank']} of {len(available_summary)}), "
+                                f"{relative_text}; {change_text}."
+                            )
+
+                        st.markdown("\n".join(market_read_lines))
+
+                    if not missing_summary.empty:
+                        missing_markets = ", ".join(missing_summary["market"].astype(str).tolist())
+                        st.warning(
+                            f"No usable {metric_label.lower()} data was found for: {missing_markets}. "
+                            "Try another property type or time period."
+                        )
+
+                st.subheader("Latest comparison")
 
                 latest_selected = plot_df[
                     plot_df[date_col] == plot_df[date_col].max()
@@ -987,99 +1197,511 @@ with tab2:
                     use_container_width=True,
                 )
 with tab3:
-    st.subheader("Inventory and Market Speed")
+    st.subheader("Supply / Demand")
+    st.caption("Understand whether housing supply or buyer activity is gaining the upper hand.")
 
-    inv_metrics = [c for c in ["inventory", "active_listings", "months_of_supply", "median_dom", "new_listings"] if c in df.columns]
+    supply_markets = sorted(df[region_col].dropna().astype(str).unique().tolist())
+    preferred_supply_market = {
+        "county": "King County, WA",
+        "city": "Seattle, WA",
+        "state": "Washington",
+    }.get(level)
+    supply_market_index = (
+        supply_markets.index(preferred_supply_market)
+        if preferred_supply_market in supply_markets
+        else 0
+    )
 
-    if not inv_metrics:
-        st.warning("Inventory / days-on-market columns not found.")
+    supply_property_types = (
+        sorted(df["property_type"].dropna().astype(str).unique().tolist())
+        if "property_type" in df.columns
+        else []
+    )
+    supply_property_index = (
+        supply_property_types.index("All Residential")
+        if "All Residential" in supply_property_types
+        else 0
+    )
+
+    supply_market_col, supply_property_col = st.columns([1.35, 1])
+    with supply_market_col:
+        selected_supply_market = st.selectbox(
+            "Market",
+            supply_markets,
+            index=supply_market_index,
+            key=f"supply_market_{level}",
+        )
+    with supply_property_col:
+        selected_supply_property = st.selectbox(
+            "Property type",
+            supply_property_types,
+            index=supply_property_index,
+            key=f"supply_property_{level}",
+        ) if supply_property_types else None
+
+    supply_history = df[df[region_col].astype(str) == selected_supply_market].copy()
+    if selected_supply_property and "property_type" in supply_history.columns:
+        supply_history = supply_history[
+            supply_history["property_type"].astype(str) == selected_supply_property
+        ].copy()
+    supply_history = supply_history.sort_values(date_col)
+
+    if supply_history.empty:
+        st.warning("No data is available for the selected market and property type.")
     else:
-        metric = st.selectbox("Inventory / speed metric", inv_metrics)
-        regions = sorted(df[region_col].dropna().astype(str).unique().tolist())
-        selected = st.multiselect(
-            "Markets",
-            regions,
-            default=regions[: min(8, len(regions))],
-            key="inventory_regions",
+        latest_supply_row = supply_history.iloc[-1]
+
+        def supply_value(metric_name):
+            value = latest_supply_row.get(metric_name)
+            return pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
+
+        def supply_change(metric_name):
+            return calculate_period_change(supply_history, metric_name, date_col)
+
+        inventory_value = supply_value("inventory")
+        months_supply_value = supply_value("months_of_supply")
+        new_listings_value = supply_value("new_listings")
+        pending_sales_value = supply_value("pending_sales")
+        homes_sold_value = supply_value("homes_sold")
+        dom_value = supply_value("median_dom")
+        sale_to_list_value = supply_value("avg_sale_to_list")
+        sold_above_value = supply_value("sold_above_list")
+
+        inventory_change = supply_change("inventory")
+        new_listings_change = supply_change("new_listings")
+        pending_change = supply_change("pending_sales")
+        homes_sold_change = supply_change("homes_sold")
+        dom_change = supply_change("median_dom")
+        sale_to_list_change = supply_change("avg_sale_to_list")
+
+        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+        kpi1.metric(
+            "Homes for Sale",
+            f"{inventory_value:,.0f}" if pd.notna(inventory_value) else "N/A",
+            f"{inventory_change:+.1%} over period" if inventory_change is not None else None,
+        )
+        kpi2.metric(
+            "Months of Supply",
+            f"{months_supply_value:.1f}" if pd.notna(months_supply_value) else "N/A",
+        )
+        kpi3.metric(
+            "New Listings",
+            f"{new_listings_value:,.0f}" if pd.notna(new_listings_value) else "N/A",
+            f"{new_listings_change:+.1%} over period" if new_listings_change is not None else None,
+        )
+        kpi4.metric(
+            "Pending Sales",
+            f"{pending_sales_value:,.0f}" if pd.notna(pending_sales_value) else "N/A",
+            f"{pending_change:+.1%} over period" if pending_change is not None else None,
         )
 
-        plot_df = df[df[region_col].astype(str).isin(selected)].copy()
-        plot_df[metric] = pd.to_numeric(plot_df[metric], errors="coerce")
+        pressure_score = 0
+        pressure_evidence = 0
+        if inventory_change is not None:
+            pressure_score += 1 if inventory_change > 0.05 else -1 if inventory_change < -0.05 else 0
+            pressure_evidence += 1
+        if pending_change is not None:
+            pressure_score += 1 if pending_change < -0.05 else -1 if pending_change > 0.05 else 0
+            pressure_evidence += 1
+        if dom_change is not None:
+            pressure_score += 1 if dom_change > 0.05 else -1 if dom_change < -0.05 else 0
+            pressure_evidence += 1
+        if sale_to_list_change is not None:
+            pressure_score += 1 if sale_to_list_change < -0.005 else -1 if sale_to_list_change > 0.005 else 0
+            pressure_evidence += 1
 
-        fig = px.line(
-            plot_df,
-            x=date_col,
-            y=metric,
-            color=region_col,
-            title=metric.replace("_", " ").title(),
+        if pressure_evidence == 0:
+            pressure_label = "Insufficient evidence"
+        elif pressure_score >= 2:
+            pressure_label = "Supply is gaining leverage"
+        elif pressure_score <= -2:
+            pressure_label = "Demand is gaining leverage"
+        else:
+            pressure_label = "Supply and demand look balanced"
+
+        read_parts = [f"Current signal: {pressure_label}."]
+        if inventory_change is not None and pending_change is not None:
+            if inventory_change > pending_change + 0.05:
+                read_parts.append(
+                    f"Available inventory changed {inventory_change:+.1%}, while pending sales changed "
+                    f"{pending_change:+.1%}; supply is expanding faster than buyer commitments."
+                )
+            elif pending_change > inventory_change + 0.05:
+                read_parts.append(
+                    f"Pending sales changed {pending_change:+.1%}, outpacing inventory at "
+                    f"{inventory_change:+.1%}; buyers are absorbing supply more quickly."
+                )
+            else:
+                read_parts.append(
+                    f"Inventory ({inventory_change:+.1%}) and pending sales ({pending_change:+.1%}) "
+                    "are moving at broadly similar rates."
+                )
+        elif inventory_change is not None:
+            read_parts.append(f"Inventory changed {inventory_change:+.1%} over the selected period.")
+
+        if pd.notna(months_supply_value):
+            if months_supply_value >= 4:
+                read_parts.append(f"At {months_supply_value:.1f} months, supply is relatively loose.")
+            elif months_supply_value <= 2:
+                read_parts.append(f"At {months_supply_value:.1f} months, available supply remains tight.")
+            else:
+                read_parts.append(f"At {months_supply_value:.1f} months, supply is in a middle range.")
+
+        if dom_change is not None:
+            speed_direction = "slowing" if dom_change > 0.05 else "accelerating" if dom_change < -0.05 else "stable"
+            read_parts.append(f"Market speed is {speed_direction}, with days on market changing {dom_change:+.1%}.")
+
+        st.subheader("Supply / demand read")
+        st.info(" ".join(read_parts))
+
+        supply_metrics = [metric for metric in ["inventory", "new_listings"] if metric in supply_history.columns]
+        demand_metrics = [metric for metric in ["pending_sales", "homes_sold"] if metric in supply_history.columns]
+        supply_chart_col, demand_chart_col = st.columns(2)
+
+        def make_pressure_chart(history_df, metrics, title, colors):
+            chart_df = history_df[[date_col] + metrics].copy()
+            for chart_metric in metrics:
+                chart_df[chart_metric] = pd.to_numeric(chart_df[chart_metric], errors="coerce")
+            chart_df = chart_df.melt(
+                id_vars=[date_col],
+                value_vars=metrics,
+                var_name="Measure",
+                value_name="Value",
+            )
+            chart_df["Measure"] = chart_df["Measure"].str.replace("_", " ").str.title()
+            chart = px.line(
+                chart_df,
+                x=date_col,
+                y="Value",
+                color="Measure",
+                title=title,
+                color_discrete_sequence=colors,
+            )
+            chart.update_traces(line_width=2.7)
+            chart.update_layout(
+                height=390,
+                plot_bgcolor="white",
+                paper_bgcolor="white",
+                margin=dict(l=20, r=20, t=60, b=20),
+                xaxis_title=None,
+                yaxis_title=None,
+                legend_title_text=None,
+                hovermode="x unified",
+            )
+            chart.update_xaxes(showgrid=False)
+            chart.update_yaxes(gridcolor="#e8eeeb")
+            return chart
+
+        with supply_chart_col:
+            if supply_metrics:
+                st.plotly_chart(
+                    make_pressure_chart(
+                        supply_history,
+                        supply_metrics,
+                        "Supply entering the market",
+                        ["#28735a", "#79a88f"],
+                    ),
+                    use_container_width=True,
+                )
+        with demand_chart_col:
+            if demand_metrics:
+                st.plotly_chart(
+                    make_pressure_chart(
+                        supply_history,
+                        demand_metrics,
+                        "Buyer activity",
+                        ["#4f7f96", "#d08b49"],
+                    ),
+                    use_container_width=True,
+                )
+
+        st.subheader("Competition and market speed")
+        competition1, competition2, competition3, competition4 = st.columns(4)
+        competition1.metric(
+            "Days on Market",
+            f"{dom_value:,.0f}" if pd.notna(dom_value) else "N/A",
+            f"{dom_change:+.1%} over period" if dom_change is not None else None,
         )
-        st.plotly_chart(fig, use_container_width=True)
-
-    st.divider()
-    st.subheader("FRED example: King County total listing count")
-
-    try:
-        fred_df = get_fred(FRED_SERIES["King County - Total Listing Count"])
-        fig = px.line(
-            fred_df,
-            x="date",
-            y="value",
-            title="King County Total Listing Count",
+        competition2.metric(
+            "Sale-to-List",
+            f"{sale_to_list_value:.2%}" if pd.notna(sale_to_list_value) else "N/A",
+            f"{sale_to_list_change:+.1%} over period" if sale_to_list_change is not None else None,
+            delta_color="inverse",
         )
-        st.plotly_chart(fig, use_container_width=True)
-    except Exception as exc:
-        st.warning(f"Could not load FRED series: {exc}")
+        competition3.metric(
+            "Sold Above List",
+            f"{sold_above_value:.1%}" if pd.notna(sold_above_value) else "N/A",
+        )
+        competition4.metric(
+            "Homes Sold",
+            f"{homes_sold_value:,.0f}" if pd.notna(homes_sold_value) else "N/A",
+            f"{homes_sold_change:+.1%} over period" if homes_sold_change is not None else None,
+        )
 
 with tab4:
-    st.subheader("Buyer vs Seller Signal")
+    st.subheader("Market Power")
+    st.caption("See who has negotiating leverage, what is driving it, and how the balance is changing.")
 
-    signal_df = add_market_signal(df)
-    latest_signal = signal_df[signal_df[date_col] == signal_df[date_col].max()].copy()
-
-    st.write(
-        "Higher score means more buyer-friendly. Lower score means more seller-friendly. "
-        "This is a first-pass model, not a final truth."
+    power_property_types = (
+        sorted(df["property_type"].dropna().astype(str).unique().tolist())
+        if "property_type" in df.columns
+        else []
     )
-
-    view_cols = [
-        region_col,
-        date_col,
-        "buyer_market_score",
-        "market_regime",
-        "months_of_supply",
-        "median_dom",
-        "inventory_yoy",
-        "median_sale_price_yoy",
-        "homes_sold_yoy",
-        "avg_sale_to_list",
-        "sold_above_list",
-    ]
-    view_cols = [c for c in view_cols if c in latest_signal.columns]
-
-    st.dataframe(
-        latest_signal[view_cols]
-        .sort_values("buyer_market_score", ascending=False)
-        .head(200),
-        use_container_width=True,
+    power_property_index = (
+        power_property_types.index("All Residential")
+        if "All Residential" in power_property_types
+        else 0
     )
+    power_market_col, power_property_col = st.columns([1.35, 1])
+    with power_property_col:
+        selected_power_property = st.selectbox(
+            "Property type",
+            power_property_types,
+            index=power_property_index,
+            key=f"power_property_{level}",
+        ) if power_property_types else None
 
-    regions = sorted(signal_df[region_col].dropna().astype(str).unique().tolist())
-    selected = st.multiselect(
-        "Markets for signal trend",
-        regions,
-        default=regions[: min(8, len(regions))],
-        key="signal_regions",
-    )
+    power_base_df = df.copy()
+    if selected_power_property and "property_type" in power_base_df.columns:
+        power_base_df = power_base_df[
+            power_base_df["property_type"].astype(str) == selected_power_property
+        ].copy()
 
-    plot_df = signal_df[signal_df[region_col].astype(str).isin(selected)].copy()
-    fig = px.line(
-        plot_df,
-        x=date_col,
-        y="buyer_market_score",
-        color=region_col,
-        title="Buyer Market Score Over Time",
+    signal_df = add_market_signal(power_base_df)
+    power_markets = sorted(signal_df[region_col].dropna().astype(str).unique().tolist())
+    preferred_power_market = {
+        "county": "King County, WA",
+        "city": "Seattle, WA",
+        "state": "Washington",
+    }.get(level)
+    power_market_index = (
+        power_markets.index(preferred_power_market)
+        if preferred_power_market in power_markets
+        else 0
     )
-    st.plotly_chart(fig, use_container_width=True)
+    with power_market_col:
+        selected_power_market = st.selectbox(
+            "Market",
+            power_markets,
+            index=power_market_index,
+            key=f"power_market_{level}",
+        )
+
+    power_history = signal_df[
+        signal_df[region_col].astype(str) == selected_power_market
+    ].copy().sort_values(date_col)
+
+    if power_history.empty:
+        st.warning("No market-power data is available for this selection.")
+    else:
+        latest_power = power_history.iloc[-1]
+        current_score = pd.to_numeric(
+            pd.Series([latest_power.get("buyer_market_score")]), errors="coerce"
+        ).iloc[0]
+        current_regime = latest_power.get("market_regime", "Unknown")
+        current_mos = pd.to_numeric(
+            pd.Series([latest_power.get("months_of_supply")]), errors="coerce"
+        ).iloc[0]
+        current_dom = pd.to_numeric(
+            pd.Series([latest_power.get("median_dom")]), errors="coerce"
+        ).iloc[0]
+        current_inventory_yoy = pd.to_numeric(
+            pd.Series([latest_power.get("inventory_yoy")]), errors="coerce"
+        ).iloc[0]
+        current_price_yoy = pd.to_numeric(
+            pd.Series([latest_power.get("median_sale_price_yoy")]), errors="coerce"
+        ).iloc[0]
+        current_sale_to_list = pd.to_numeric(
+            pd.Series([latest_power.get("avg_sale_to_list")]), errors="coerce"
+        ).iloc[0]
+        current_sold_above = pd.to_numeric(
+            pd.Series([latest_power.get("sold_above_list")]), errors="coerce"
+        ).iloc[0]
+
+        first_valid_score = power_history["buyer_market_score"].dropna()
+        score_point_change = (
+            current_score - first_valid_score.iloc[0]
+            if pd.notna(current_score) and not first_valid_score.empty
+            else None
+        )
+
+        regime_class = {
+            "Buyer market": "badge-buyer",
+            "Seller market": "badge-seller",
+            "Balanced / mixed": "badge-balanced",
+        }.get(current_regime, "badge-balanced")
+        st.markdown(
+            f'<div class="market-heading">{selected_power_market}</div>'
+            f'<div class="market-meta">Latest data: {latest_power[date_col]:%B %Y} &nbsp; '
+            f'<span class="market-badge {regime_class}">{current_regime}</span></div>',
+            unsafe_allow_html=True,
+        )
+
+        power1, power2, power3, power4 = st.columns(4)
+        power1.metric(
+            "Buyer Power Score",
+            f"{current_score:+.2f}" if pd.notna(current_score) else "N/A",
+            f"{score_point_change:+.2f} points over period" if score_point_change is not None else None,
+        )
+        power2.metric(
+            "Months of Supply",
+            f"{current_mos:.1f}" if pd.notna(current_mos) else "N/A",
+        )
+        power3.metric(
+            "Days on Market",
+            f"{current_dom:,.0f}" if pd.notna(current_dom) else "N/A",
+        )
+        power4.metric(
+            "Sale-to-List",
+            f"{current_sale_to_list:.2%}" if pd.notna(current_sale_to_list) else "N/A",
+        )
+
+        buyer_drivers = []
+        seller_drivers = []
+        neutral_drivers = []
+
+        if pd.notna(current_mos):
+            if current_mos >= 4:
+                buyer_drivers.append(f"{current_mos:.1f} months of supply gives buyers more choice")
+            elif current_mos <= 2:
+                seller_drivers.append(f"only {current_mos:.1f} months of supply keeps choices tight")
+            else:
+                neutral_drivers.append(f"{current_mos:.1f} months of supply is in a middle range")
+        if pd.notna(current_dom):
+            if current_dom >= 45:
+                buyer_drivers.append(f"homes take {current_dom:.0f} days to sell")
+            elif current_dom <= 14:
+                seller_drivers.append(f"homes sell quickly at a median {current_dom:.0f} days")
+            else:
+                neutral_drivers.append(f"the median sale takes {current_dom:.0f} days")
+        if pd.notna(current_inventory_yoy):
+            if current_inventory_yoy >= 0.10:
+                buyer_drivers.append(f"inventory is up {current_inventory_yoy:.1%} year over year")
+            elif current_inventory_yoy <= -0.10:
+                seller_drivers.append(f"inventory is down {abs(current_inventory_yoy):.1%} year over year")
+        if pd.notna(current_price_yoy):
+            if current_price_yoy <= -0.03:
+                buyer_drivers.append(f"prices are down {abs(current_price_yoy):.1%} year over year")
+            elif current_price_yoy >= 0.05:
+                seller_drivers.append(f"prices are up {current_price_yoy:.1%} year over year")
+        if pd.notna(current_sale_to_list):
+            if current_sale_to_list < 0.99:
+                buyer_drivers.append(f"homes sell at {current_sale_to_list:.1%} of list price")
+            elif current_sale_to_list >= 1.01:
+                seller_drivers.append(f"homes sell above asking at {current_sale_to_list:.1%} of list")
+        if pd.notna(current_sold_above):
+            if current_sold_above >= 0.40:
+                seller_drivers.append(f"{current_sold_above:.1%} of homes sell above list")
+            elif current_sold_above <= 0.15:
+                buyer_drivers.append(f"only {current_sold_above:.1%} of homes sell above list")
+
+        read_parts = [
+            f"The model currently classifies {selected_power_market} as {str(current_regime).lower()}."
+        ]
+        if score_point_change is not None:
+            if score_point_change > 0.20:
+                read_parts.append(f"Buyer leverage improved by {score_point_change:.2f} score points over the selected period.")
+            elif score_point_change < -0.20:
+                read_parts.append(f"Seller leverage improved by {abs(score_point_change):.2f} score points over the selected period.")
+            else:
+                read_parts.append("The balance of power has not shifted dramatically over the selected period.")
+        if buyer_drivers:
+            read_parts.append("Buyer-friendly signals include " + "; ".join(buyer_drivers) + ".")
+        if seller_drivers:
+            read_parts.append("Seller-friendly signals include " + "; ".join(seller_drivers) + ".")
+        if neutral_drivers and not buyer_drivers and not seller_drivers:
+            read_parts.append("The main indicators are mixed: " + "; ".join(neutral_drivers) + ".")
+
+        st.subheader("Power read")
+        st.info(" ".join(read_parts))
+
+        power_chart = go.Figure()
+        power_chart.add_hrect(y0=0.75, y1=3, fillcolor="#e6f1f8", opacity=0.65, line_width=0)
+        power_chart.add_hrect(y0=-0.75, y1=0.75, fillcolor="#f1f3f2", opacity=0.8, line_width=0)
+        power_chart.add_hrect(y0=-3, y1=-0.75, fillcolor="#fae9e6", opacity=0.65, line_width=0)
+        power_chart.add_trace(
+            go.Scatter(
+                x=power_history[date_col],
+                y=power_history["buyer_market_score"],
+                mode="lines+markers",
+                line=dict(color="#28735a", width=3),
+                marker=dict(size=6),
+                name="Buyer power score",
+                hovertemplate="%{x|%b %Y}<br>Score: %{y:+.2f}<extra></extra>",
+            )
+        )
+        power_chart.add_hline(y=0.75, line_dash="dot", line_color="#4f7f96")
+        power_chart.add_hline(y=-0.75, line_dash="dot", line_color="#d96c5f")
+        power_chart.update_layout(
+            title="Balance of power over time",
+            height=430,
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin=dict(l=20, r=20, t=60, b=20),
+            xaxis_title=None,
+            yaxis_title="Seller-friendly  <  Score  >  Buyer-friendly",
+            showlegend=False,
+            hovermode="x unified",
+        )
+        power_chart.update_xaxes(showgrid=False)
+        power_chart.update_yaxes(gridcolor="#e8eeeb", zeroline=True, zerolinecolor="#9aa8a1")
+        st.plotly_chart(power_chart, use_container_width=True)
+
+        latest_signal = (
+            signal_df.sort_values(date_col)
+            .groupby(region_col, as_index=False)
+            .tail(1)
+            .dropna(subset=["buyer_market_score"])
+            .copy()
+        )
+        latest_signal["peer_rank"] = latest_signal["buyer_market_score"].rank(
+            method="min",
+            ascending=False,
+        ).astype(int)
+        selected_peer = latest_signal[
+            latest_signal[region_col].astype(str) == selected_power_market
+        ]
+
+        st.subheader("Peer comparison")
+        if not selected_peer.empty:
+            peer_row = selected_peer.iloc[0]
+            st.caption(
+                f"{selected_power_market} ranks {peer_row['peer_rank']} of {len(latest_signal)} "
+                "markets for buyer leverage. Higher scores are more buyer-friendly."
+            )
+
+        peer_view = latest_signal.nlargest(10, "buyer_market_score").copy()
+        if not selected_peer.empty and selected_power_market not in peer_view[region_col].astype(str).tolist():
+            peer_view = pd.concat([peer_view, selected_peer], ignore_index=True)
+        peer_view = peer_view.sort_values("buyer_market_score")
+        peer_chart = px.bar(
+            peer_view,
+            x="buyer_market_score",
+            y=region_col,
+            orientation="h",
+            color="buyer_market_score",
+            color_continuous_scale=["#d96c5f", "#f1f3f2", "#4f7f96"],
+            color_continuous_midpoint=0,
+            title="Most buyer-friendly markets",
+        )
+        peer_chart.update_layout(
+            height=max(380, 34 * len(peer_view)),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin=dict(l=20, r=20, t=60, b=20),
+            xaxis_title="Buyer power score",
+            yaxis_title=None,
+            coloraxis_showscale=False,
+        )
+        peer_chart.update_xaxes(gridcolor="#e8eeeb")
+        st.plotly_chart(peer_chart, use_container_width=True)
+
+        with st.expander("How the score works"):
+            st.write(
+                "Higher scores indicate more buyer leverage. The model weighs months of supply, "
+                "days on market, inventory growth, price growth, sales activity, sale-to-list ratio, "
+                "and the share of homes sold above list. Scores are relative to the markets and period selected."
+            )
 
 with tab5:
     st.subheader("Washington County Map")
@@ -1273,7 +1895,320 @@ with tab5:
         st.dataframe(distance_table, use_container_width=True)
 
 with tab6:
-    st.subheader("Raw Data")
-    st.write(f"Detected date column: `{date_col}`")
-    st.write(f"Detected market column: `{region_col}`")
-    st.dataframe(df.head(1000), use_container_width=True)
+    st.subheader("Opportunity Finder")
+    st.caption(
+        "Screen Washington markets for buyer value or seller strength using current market conditions. "
+        "This ranks markets, not individual properties."
+    )
+
+    finder_goal = st.radio(
+        "I want to",
+        ["Find buyer opportunities", "Find seller opportunities"],
+        horizontal=True,
+        key="opportunity_goal",
+    )
+
+    finder_property_types = (
+        sorted(df["property_type"].dropna().astype(str).unique().tolist())
+        if "property_type" in df.columns
+        else []
+    )
+    finder_property_index = (
+        finder_property_types.index("All Residential")
+        if "All Residential" in finder_property_types
+        else 0
+    )
+
+    finder_property_col, finder_results_col = st.columns([1.4, 1])
+    with finder_property_col:
+        finder_property = st.selectbox(
+            "Property type",
+            finder_property_types,
+            index=finder_property_index,
+            key=f"finder_property_{level}",
+        ) if finder_property_types else None
+    with finder_results_col:
+        result_count = st.slider("Results to show", 5, 20, 10, key="finder_result_count")
+
+    finder_df = df.copy()
+    if finder_property and "property_type" in finder_df.columns:
+        finder_df = finder_df[
+            finder_df["property_type"].astype(str) == finder_property
+        ].copy()
+
+    latest_opportunities = (
+        finder_df.sort_values(date_col)
+        .groupby(region_col, as_index=False)
+        .tail(1)
+        .copy()
+    )
+
+    opportunity_metrics = [
+        "median_sale_price",
+        "median_sale_price_yoy_calc",
+        "inventory_yoy_calc",
+        "months_of_supply",
+        "median_dom",
+        "avg_sale_to_list",
+        "sold_above_list",
+        "price_drops",
+        "homes_sold",
+        "homes_sold_yoy_calc",
+    ]
+    for opportunity_metric in opportunity_metrics:
+        if opportunity_metric not in latest_opportunities.columns:
+            latest_opportunities[opportunity_metric] = None
+        latest_opportunities[opportunity_metric] = pd.to_numeric(
+            latest_opportunities[opportunity_metric], errors="coerce"
+        )
+
+    available_prices = latest_opportunities["median_sale_price"].dropna()
+    max_price_default = int(available_prices.quantile(0.75)) if not available_prices.empty else 1000000
+    max_price_limit = int(available_prices.max()) if not available_prices.empty else 2000000
+    max_price_limit = max(100000, int(math.ceil(max_price_limit / 50000) * 50000))
+    max_price_default = min(max_price_default, max_price_limit)
+
+    filter_price_col, filter_activity_col = st.columns(2)
+    with filter_price_col:
+        if finder_goal == "Find buyer opportunities":
+            max_purchase_price = st.slider(
+                "Maximum median sale price",
+                min_value=100000,
+                max_value=max_price_limit,
+                value=max(100000, max_price_default),
+                step=25000,
+                format="$%d",
+                key=f"finder_max_price_{level}",
+            )
+        else:
+            max_purchase_price = None
+            minimum_price = st.slider(
+                "Minimum median sale price",
+                min_value=0,
+                max_value=max_price_limit,
+                value=0,
+                step=25000,
+                format="$%d",
+                key=f"finder_min_price_{level}",
+            )
+    with filter_activity_col:
+        minimum_sales = st.slider(
+            "Minimum monthly homes sold",
+            min_value=0,
+            max_value=max(10, int(latest_opportunities["homes_sold"].max(skipna=True) or 10)),
+            value=10 if level in ["county", "city"] else 0,
+            step=10,
+            key=f"finder_min_sales_{level}",
+            help="Filters out very small markets where monthly statistics can be volatile.",
+        )
+
+    if finder_goal == "Find buyer opportunities":
+        latest_opportunities = latest_opportunities[
+            latest_opportunities["median_sale_price"].le(max_purchase_price)
+            | latest_opportunities["median_sale_price"].isna()
+        ].copy()
+    else:
+        latest_opportunities = latest_opportunities[
+            latest_opportunities["median_sale_price"].ge(minimum_price)
+            | latest_opportunities["median_sale_price"].isna()
+        ].copy()
+    latest_opportunities = latest_opportunities[
+        latest_opportunities["homes_sold"].fillna(0) >= minimum_sales
+    ].copy()
+
+    def finder_zscore(series):
+        numeric = pd.to_numeric(series, errors="coerce")
+        std = numeric.std(skipna=True)
+        if pd.isna(std) or std == 0:
+            return pd.Series(0.0, index=numeric.index)
+        return ((numeric - numeric.mean(skipna=True)) / std).fillna(0)
+
+    if latest_opportunities.empty:
+        st.warning("No markets match these filters. Try widening the price or sales criteria.")
+    else:
+        price_z = finder_zscore(latest_opportunities["median_sale_price"])
+        price_growth_z = finder_zscore(latest_opportunities["median_sale_price_yoy_calc"])
+        inventory_growth_z = finder_zscore(latest_opportunities["inventory_yoy_calc"])
+        supply_z = finder_zscore(latest_opportunities["months_of_supply"])
+        dom_z = finder_zscore(latest_opportunities["median_dom"])
+        sale_to_list_z = finder_zscore(latest_opportunities["avg_sale_to_list"])
+        sold_above_z = finder_zscore(latest_opportunities["sold_above_list"])
+        price_drops_z = finder_zscore(latest_opportunities["price_drops"])
+        sales_growth_z = finder_zscore(latest_opportunities["homes_sold_yoy_calc"])
+
+        latest_opportunities["buyer_opportunity_score"] = (
+            -0.25 * price_z
+            -0.20 * price_growth_z
+            +0.20 * supply_z
+            +0.15 * dom_z
+            +0.10 * inventory_growth_z
+            -0.05 * sale_to_list_z
+            +0.05 * price_drops_z
+        )
+        latest_opportunities["seller_opportunity_score"] = (
+            +0.25 * price_growth_z
+            -0.20 * supply_z
+            -0.15 * dom_z
+            +0.15 * sale_to_list_z
+            +0.10 * sold_above_z
+            +0.10 * sales_growth_z
+            +0.05 * price_z
+        )
+
+        score_column = (
+            "buyer_opportunity_score"
+            if finder_goal == "Find buyer opportunities"
+            else "seller_opportunity_score"
+        )
+        latest_opportunities = latest_opportunities.sort_values(
+            score_column, ascending=False
+        ).copy()
+        latest_opportunities["opportunity_rank"] = range(1, len(latest_opportunities) + 1)
+
+        def opportunity_reasons(row, buyer_mode):
+            reasons = []
+            price = row.get("median_sale_price")
+            price_yoy = row.get("median_sale_price_yoy_calc")
+            inventory_yoy = row.get("inventory_yoy_calc")
+            supply = row.get("months_of_supply")
+            dom = row.get("median_dom")
+            sale_to_list = row.get("avg_sale_to_list")
+            sold_above = row.get("sold_above_list")
+
+            if buyer_mode:
+                if pd.notna(price) and price <= latest_opportunities["median_sale_price"].median():
+                    reasons.append("below-median pricing")
+                if pd.notna(price_yoy) and price_yoy <= 0:
+                    reasons.append(f"prices {price_yoy:+.1%} YoY")
+                if pd.notna(supply) and supply >= 3:
+                    reasons.append(f"{supply:.1f} months of supply")
+                if pd.notna(dom) and dom >= 30:
+                    reasons.append(f"{dom:.0f} days on market")
+                if pd.notna(inventory_yoy) and inventory_yoy >= 0.10:
+                    reasons.append(f"inventory up {inventory_yoy:.1%}")
+                if pd.notna(sale_to_list) and sale_to_list < 0.99:
+                    reasons.append("sales below asking")
+            else:
+                if pd.notna(price_yoy) and price_yoy >= 0.03:
+                    reasons.append(f"prices up {price_yoy:.1%} YoY")
+                if pd.notna(supply) and supply <= 2.5:
+                    reasons.append(f"tight {supply:.1f}-month supply")
+                if pd.notna(dom) and dom <= 21:
+                    reasons.append(f"fast {dom:.0f}-day market")
+                if pd.notna(sale_to_list) and sale_to_list >= 1:
+                    reasons.append("selling at or above asking")
+                if pd.notna(sold_above) and sold_above >= 0.30:
+                    reasons.append(f"{sold_above:.0%} sell above list")
+            return ", ".join(reasons[:3]) if reasons else "relative strength across available indicators"
+
+        buyer_mode = finder_goal == "Find buyer opportunities"
+        latest_opportunities["Why it ranks"] = latest_opportunities.apply(
+            lambda row: opportunity_reasons(row, buyer_mode), axis=1
+        )
+        top_opportunities = latest_opportunities.head(result_count).copy()
+        leader = top_opportunities.iloc[0]
+
+        if buyer_mode:
+            lead_read = (
+                f"{leader[region_col]} is the strongest buyer-market candidate under the current filters. "
+                f"Its median sale price is ${leader['median_sale_price']:,.0f}, with "
+                f"{leader['months_of_supply']:.1f} months of supply and "
+                f"{leader['median_dom']:.0f} median days on market. "
+                f"Key signals: {leader['Why it ranks']}."
+            )
+        else:
+            lead_read = (
+                f"{leader[region_col]} currently shows the strongest conditions for sellers. "
+                f"Its median sale price is ${leader['median_sale_price']:,.0f}, homes sell at "
+                f"{leader['avg_sale_to_list']:.1%} of list price, and the median sale takes "
+                f"{leader['median_dom']:.0f} days. Key signals: {leader['Why it ranks']}."
+            )
+
+        st.subheader("Opportunity read")
+        st.info(lead_read)
+
+        chart_title = "Best markets for buyers" if buyer_mode else "Strongest markets for sellers"
+        opportunity_chart = px.bar(
+            top_opportunities.sort_values(score_column),
+            x=score_column,
+            y=region_col,
+            orientation="h",
+            color=score_column,
+            color_continuous_scale=["#d9e4df", "#28735a"] if buyer_mode else ["#f4d8d4", "#b95347"],
+            title=chart_title,
+            hover_data={
+                "median_sale_price": ":$,.0f",
+                "months_of_supply": ":.1f",
+                "median_dom": ":.0f",
+                score_column: ":.2f",
+            },
+        )
+        opportunity_chart.update_layout(
+            height=max(390, 36 * len(top_opportunities)),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin=dict(l=20, r=20, t=60, b=20),
+            xaxis_title="Relative opportunity score",
+            yaxis_title=None,
+            coloraxis_showscale=False,
+        )
+        opportunity_chart.update_xaxes(gridcolor="#e8eeeb")
+        st.plotly_chart(opportunity_chart, use_container_width=True)
+
+        st.subheader("Ranked market opportunities")
+        display_df = top_opportunities[
+            [
+                "opportunity_rank",
+                region_col,
+                "median_sale_price",
+                "median_sale_price_yoy_calc",
+                "months_of_supply",
+                "median_dom",
+                "avg_sale_to_list",
+                "homes_sold",
+                "Why it ranks",
+            ]
+        ].copy()
+        display_df.columns = [
+            "Rank",
+            "Market",
+            "Median Sale Price",
+            "Price YoY",
+            "Months of Supply",
+            "Days on Market",
+            "Sale-to-List",
+            "Homes Sold",
+            "Why it ranks",
+        ]
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Median Sale Price": st.column_config.NumberColumn(format="$%,.0f"),
+                "Price YoY": st.column_config.NumberColumn(format="%.1%%"),
+                "Months of Supply": st.column_config.NumberColumn(format="%.1f"),
+                "Days on Market": st.column_config.NumberColumn(format="%.0f"),
+                "Sale-to-List": st.column_config.NumberColumn(format="%.1%%"),
+                "Homes Sold": st.column_config.NumberColumn(format="%,.0f"),
+            },
+        )
+
+        with st.expander("How opportunities are ranked"):
+            if buyer_mode:
+                st.write(
+                    "Buyer rankings reward lower prices, softer price growth, more months of supply, "
+                    "longer market time, inventory growth, price reductions, and weaker sale-to-list pressure."
+                )
+            else:
+                st.write(
+                    "Seller rankings reward stronger price growth, tighter supply, faster sales, "
+                    "higher sale-to-list ratios, more above-list sales, and stronger sales activity."
+                )
+            st.caption(
+                "Scores are relative to the markets matching the current filters. They identify markets "
+                "worth investigating and do not predict a specific transaction price or guarantee a return."
+            )
+
+        with st.expander("View underlying latest records"):
+            st.dataframe(top_opportunities, use_container_width=True, hide_index=True)
