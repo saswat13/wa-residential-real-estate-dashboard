@@ -2180,17 +2180,38 @@ with tab6:
             "Homes Sold",
             "Why it ranks",
         ]
+        display_df["Median Sale Price"] = display_df["Median Sale Price"].map(
+            lambda value: f"${value:,.0f}" if pd.notna(value) else "N/A"
+        )
+        display_df["Price YoY"] = display_df["Price YoY"].map(
+            lambda value: f"{value:.1%}" if pd.notna(value) else "N/A"
+        )
+        display_df["Months of Supply"] = display_df["Months of Supply"].map(
+            lambda value: f"{value:.1f}" if pd.notna(value) else "N/A"
+        )
+        display_df["Days on Market"] = display_df["Days on Market"].map(
+            lambda value: f"{value:,.0f}" if pd.notna(value) else "N/A"
+        )
+        display_df["Sale-to-List"] = display_df["Sale-to-List"].map(
+            lambda value: f"{value:.1%}" if pd.notna(value) else "N/A"
+        )
+        display_df["Homes Sold"] = display_df["Homes Sold"].map(
+            lambda value: f"{value:,.0f}" if pd.notna(value) else "N/A"
+        )
         st.dataframe(
             display_df,
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Median Sale Price": st.column_config.NumberColumn(format="$%,.0f"),
-                "Price YoY": st.column_config.NumberColumn(format="%.1%%"),
-                "Months of Supply": st.column_config.NumberColumn(format="%.1f"),
-                "Days on Market": st.column_config.NumberColumn(format="%.0f"),
-                "Sale-to-List": st.column_config.NumberColumn(format="%.1%%"),
-                "Homes Sold": st.column_config.NumberColumn(format="%,.0f"),
+                "Rank": st.column_config.NumberColumn(width="small"),
+                "Market": st.column_config.TextColumn(width="medium"),
+                "Median Sale Price": st.column_config.TextColumn(width="medium"),
+                "Price YoY": st.column_config.TextColumn(width="small"),
+                "Months of Supply": st.column_config.TextColumn(width="small"),
+                "Days on Market": st.column_config.TextColumn(width="small"),
+                "Sale-to-List": st.column_config.TextColumn(width="small"),
+                "Homes Sold": st.column_config.TextColumn(width="small"),
+                "Why it ranks": st.column_config.TextColumn(width="large"),
             },
         )
 
