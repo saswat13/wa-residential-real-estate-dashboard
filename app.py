@@ -66,6 +66,17 @@ st.markdown(
     .badge-buyer { background: #e6f1f8; color: #246083; }
     .badge-seller { background: #fae9e6; color: #a7493e; }
     .badge-balanced { background: #e5f2eb; color: #25634d; }
+    .leverage-panel { background: white; border: 1px solid #dfe8e3; border-radius: 16px; padding: 1.1rem 1.25rem; margin: .4rem 0 1rem; }
+    .leverage-title { color: var(--wa-navy); font-size: 1.35rem; font-weight: 760; margin-bottom: .2rem; }
+    .leverage-copy { color: var(--wa-slate); font-size: .9rem; margin-bottom: 1rem; }
+    .leverage-track { position: relative; height: 14px; border-radius: 999px; background: linear-gradient(90deg, #d96c5f 0%, #f4d6d1 27%, #e7ece9 50%, #d5e7ef 73%, #4f7f96 100%); }
+    .leverage-marker { position: absolute; top: -6px; width: 4px; height: 26px; border-radius: 3px; background: #123047; box-shadow: 0 0 0 3px white; }
+    .leverage-labels { display: flex; justify-content: space-between; color: var(--wa-slate); font-size: .75rem; font-weight: 650; margin-top: .55rem; }
+    .meaning-card { border-radius: 14px; padding: 1rem 1.1rem; min-height: 132px; }
+    .meaning-buyer { background: #eef6fa; border: 1px solid #d5e7ef; }
+    .meaning-seller { background: #fdf1ef; border: 1px solid #f2d8d3; }
+    .meaning-title { color: var(--wa-navy); font-weight: 750; margin-bottom: .35rem; }
+    .meaning-copy { color: #46555e; font-size: .9rem; line-height: 1.5; }
     [data-testid="stMetric"] {
         background: white;
         border: 1px solid #dfe8e3;
@@ -1537,11 +1548,54 @@ with tab4:
             unsafe_allow_html=True,
         )
 
+        if pd.isna(current_score):
+            leverage_label = "Leverage unavailable"
+            leverage_explanation = "There is not enough complete data to assess negotiating leverage."
+            marker_position = 50
+        elif current_score >= 0.75:
+            leverage_label = "Clear buyer advantage"
+            leverage_explanation = "Buyers generally have more choice and negotiating room than sellers."
+            marker_position = min(96, 50 + (current_score / 1.5) * 46)
+        elif current_score >= 0.15:
+            leverage_label = "Slight buyer edge"
+            leverage_explanation = "Conditions are broadly balanced, but buyers have somewhat more leverage."
+            marker_position = min(96, 50 + (current_score / 1.5) * 46)
+        elif current_score > -0.15:
+            leverage_label = "Evenly balanced"
+            leverage_explanation = "Neither side has a clear negotiating advantage based on current indicators."
+            marker_position = 50 + (current_score / 1.5) * 46
+        elif current_score > -0.75:
+            leverage_label = "Slight seller edge"
+            leverage_explanation = "The market is still mixed, but sellers retain somewhat more leverage."
+            marker_position = max(4, 50 + (current_score / 1.5) * 46)
+        else:
+            leverage_label = "Clear seller advantage"
+            leverage_explanation = "Tighter or faster conditions generally give sellers more negotiating power."
+            marker_position = max(4, 50 + (current_score / 1.5) * 46)
+
+        st.markdown(
+            f"""
+            <div class="leverage-panel">
+                <div class="section-kicker">Who has leverage?</div>
+                <div class="leverage-title">{leverage_label}</div>
+                <div class="leverage-copy">{leverage_explanation}</div>
+                <div class="leverage-track">
+                    <div class="leverage-marker" style="left: {marker_position:.1f}%;"></div>
+                </div>
+                <div class="leverage-labels">
+                    <span>Seller advantage</span><span>Balanced</span><span>Buyer advantage</span>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         power1, power2, power3, power4 = st.columns(4)
         power1.metric(
-            "Buyer Power Score",
+            "Model Score",
             f"{current_score:+.2f}" if pd.notna(current_score) else "N/A",
             f"{score_point_change:+.2f} points over period" if score_point_change is not None else None,
+            help="Positive values favor buyers, negative values favor sellers, and values near zero are balanced. This is a relative index, not a percentage.",
         )
         power2.metric(
             "Months of Supply",
@@ -1595,25 +1649,53 @@ with tab4:
             elif current_sold_above <= 0.15:
                 buyer_drivers.append(f"only {current_sold_above:.1%} of homes sell above list")
 
-        read_parts = [
-            f"The model currently classifies {selected_power_market} as {str(current_regime).lower()}."
-        ]
+        read_parts = []
         if score_point_change is not None:
             if score_point_change > 0.20:
-                read_parts.append(f"Buyer leverage improved by {score_point_change:.2f} score points over the selected period.")
+                read_parts.append(f"Conditions shifted toward buyers by {score_point_change:.2f} points over the selected period.")
             elif score_point_change < -0.20:
-                read_parts.append(f"Seller leverage improved by {abs(score_point_change):.2f} score points over the selected period.")
+                read_parts.append(f"Conditions shifted toward sellers by {abs(score_point_change):.2f} points over the selected period.")
             else:
-                read_parts.append("The balance of power has not shifted dramatically over the selected period.")
+                read_parts.append("Negotiating leverage has remained relatively stable over the selected period.")
         if buyer_drivers:
-            read_parts.append("Buyer-friendly signals include " + "; ".join(buyer_drivers) + ".")
+            read_parts.append("Buyer signals: " + "; ".join(buyer_drivers) + ".")
         if seller_drivers:
-            read_parts.append("Seller-friendly signals include " + "; ".join(seller_drivers) + ".")
+            read_parts.append("Seller signals: " + "; ".join(seller_drivers) + ".")
         if neutral_drivers and not buyer_drivers and not seller_drivers:
-            read_parts.append("The main indicators are mixed: " + "; ".join(neutral_drivers) + ".")
+            read_parts.append("Mixed signals: " + "; ".join(neutral_drivers) + ".")
 
-        st.subheader("Power read")
+        st.subheader("Why the market leans this way")
         st.info(" ".join(read_parts))
+
+        if pd.notna(current_score) and current_score >= 0.75:
+            buyer_implication = "You may have room to negotiate price, request repairs, or include protective contingencies. Compare listings carefully because more choice can reduce urgency."
+            seller_implication = "Expect buyers to compare alternatives and negotiate. Pricing realistically and presenting the home well will matter more than testing an aggressive price."
+        elif pd.notna(current_score) and current_score >= 0.15:
+            buyer_implication = "There may be modest negotiating room, especially for listings that have been on the market longer. Strong properties can still attract competition."
+            seller_implication = "Well-priced homes can still perform, but buyers have some alternatives. Avoid relying on automatic bidding pressure."
+        elif pd.notna(current_score) and current_score <= -0.75:
+            buyer_implication = "Competition may limit discounts and contingencies. Be prepared to act quickly on desirable homes, while staying within your financial limits."
+            seller_implication = "Conditions support stronger pricing and cleaner offers. Accurate pricing can capture demand without unnecessarily limiting the buyer pool."
+        elif pd.notna(current_score) and current_score <= -0.15:
+            buyer_implication = "Sellers have a modest edge, particularly on desirable homes. Negotiation is still possible, but strong listings may move quickly."
+            seller_implication = "You have some leverage, though the market is not strongly seller-dominated. Good preparation and realistic pricing remain important."
+        else:
+            buyer_implication = "Neither side has a clear advantage. Focus negotiation on the property’s condition, time on market, and seller motivation."
+            seller_implication = "Pricing and presentation are likely to matter more than broad market leverage. Expect offers to reflect each property’s specific strengths."
+
+        buyer_meaning_col, seller_meaning_col = st.columns(2)
+        with buyer_meaning_col:
+            st.markdown(
+                f'<div class="meaning-card meaning-buyer"><div class="meaning-title">What this means for buyers</div>'
+                f'<div class="meaning-copy">{buyer_implication}</div></div>',
+                unsafe_allow_html=True,
+            )
+        with seller_meaning_col:
+            st.markdown(
+                f'<div class="meaning-card meaning-seller"><div class="meaning-title">What this means for sellers</div>'
+                f'<div class="meaning-copy">{seller_implication}</div></div>',
+                unsafe_allow_html=True,
+            )
 
         power_chart = go.Figure()
         power_chart.add_hrect(y0=0.75, y1=3, fillcolor="#e6f1f8", opacity=0.65, line_width=0)
@@ -1632,14 +1714,29 @@ with tab4:
         )
         power_chart.add_hline(y=0.75, line_dash="dot", line_color="#4f7f96")
         power_chart.add_hline(y=-0.75, line_dash="dot", line_color="#d96c5f")
+        power_chart.add_annotation(
+            x=0.01, y=0.90, xref="paper", yref="paper",
+            text="Buyer advantage", showarrow=False,
+            font=dict(color="#246083", size=12), bgcolor="rgba(230,241,248,0.9)",
+        )
+        power_chart.add_annotation(
+            x=0.01, y=0.50, xref="paper", yref="paper",
+            text="Balanced / mixed", showarrow=False,
+            font=dict(color="#52616b", size=12), bgcolor="rgba(241,243,242,0.9)",
+        )
+        power_chart.add_annotation(
+            x=0.01, y=0.10, xref="paper", yref="paper",
+            text="Seller advantage", showarrow=False,
+            font=dict(color="#a7493e", size=12), bgcolor="rgba(250,233,230,0.9)",
+        )
         power_chart.update_layout(
-            title="Balance of power over time",
+            title="How negotiating leverage has changed",
             height=430,
             plot_bgcolor="white",
             paper_bgcolor="white",
             margin=dict(l=20, r=20, t=60, b=20),
             xaxis_title=None,
-            yaxis_title="Seller-friendly  <  Score  >  Buyer-friendly",
+            yaxis_title=None,
             showlegend=False,
             hovermode="x unified",
         )
@@ -1662,12 +1759,12 @@ with tab4:
             latest_signal[region_col].astype(str) == selected_power_market
         ]
 
-        st.subheader("Peer comparison")
+        st.subheader("How this market compares")
         if not selected_peer.empty:
             peer_row = selected_peer.iloc[0]
             st.caption(
                 f"{selected_power_market} ranks {peer_row['peer_rank']} of {len(latest_signal)} "
-                "markets for buyer leverage. Higher scores are more buyer-friendly."
+                "markets for buyer leverage. Rank 1 is the most buyer-friendly market in the current comparison."
             )
 
         peer_view = latest_signal.nlargest(10, "buyer_market_score").copy()
@@ -1682,7 +1779,7 @@ with tab4:
             color="buyer_market_score",
             color_continuous_scale=["#d96c5f", "#f1f3f2", "#4f7f96"],
             color_continuous_midpoint=0,
-            title="Most buyer-friendly markets",
+            title="Markets offering the most buyer leverage",
         )
         peer_chart.update_layout(
             height=max(380, 34 * len(peer_view)),
@@ -1698,9 +1795,15 @@ with tab4:
 
         with st.expander("How the score works"):
             st.write(
-                "Higher scores indicate more buyer leverage. The model weighs months of supply, "
-                "days on market, inventory growth, price growth, sales activity, sale-to-list ratio, "
-                "and the share of homes sold above list. Scores are relative to the markets and period selected."
+                "The model score is a relative index, not a percentage. Positive values lean toward buyers, "
+                "negative values lean toward sellers, and values near zero are balanced. Scores of +0.75 or "
+                "higher are classified as buyer markets; scores of -0.75 or lower are seller markets. The model "
+                "weighs months of supply, days on market, inventory growth, price growth, sales activity, "
+                "sale-to-list ratio, and the share of homes sold above list."
+            )
+            st.caption(
+                "Example: -0.49 means a modest seller lean, not 49% less buyer power. Scores are standardized "
+                "relative to the markets, property type, and time period being analyzed."
             )
 
 with tab5:
