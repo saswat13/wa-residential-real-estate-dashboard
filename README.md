@@ -1,5 +1,9 @@
 # Washington Residential Real Estate Dashboard
 
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://wa-residential-real-estate-dashboard-by-saswat-prusty.streamlit.app/)
+
+**Live dashboard:** [wa-residential-real-estate-dashboard-by-saswat-prusty.streamlit.app](https://wa-residential-real-estate-dashboard-by-saswat-prusty.streamlit.app/)
+
 An interactive Streamlit dashboard for exploring residential real estate conditions across Washington state.
 
 The dashboard turns public housing-market data into practical answers for buyers, sellers, and market researchers:
