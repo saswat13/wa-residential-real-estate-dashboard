@@ -126,6 +126,19 @@ streamlit run app.py
 
 Open the local Streamlit URL, usually `http://localhost:8501`.
 
+## Deploy on Streamlit Community Cloud
+
+1. Sign in to [Streamlit Community Cloud](https://share.streamlit.io/) with GitHub.
+2. Select **Create app**.
+3. Choose `saswat13/wa-residential-real-estate-dashboard` and branch `main`.
+4. Set the main file path to `app.py`.
+5. In advanced settings, select Python 3.12.
+6. Select **Deploy**.
+
+No secrets are currently required. The repository includes a recent county snapshot so the deployed app opens with useful data immediately. Streamlit installs the pinned packages from `requirements.txt`.
+
+Pushes to `main`, including scheduled data updates, are automatically reflected in the hosted app.
+
 ## Load Market Data
 
 1. Choose a geography in the sidebar.
@@ -134,6 +147,15 @@ Open the local Streamlit URL, usually `http://localhost:8501`.
 4. Wait for the public dataset to download and cache locally.
 
 County data is included in the current local development workflow. State, city, and ZIP data may require their own refresh and can be considerably larger.
+
+## Data Refresh Strategy
+
+- **Immediate first load:** `local_data/redfin_wa_county.parquet` is committed as the default hosted dataset.
+- **Manual refresh:** Users can refresh the selected geography from **Data & settings**. On hosted infrastructure, that refreshed cache belongs to the current app instance and may be lost after a reboot.
+- **Weekly refresh:** `.github/workflows/refresh-county-data.yml` runs every Monday at 15:00 UTC. It downloads the latest county dataset and commits it only when the file changes.
+- **Automatic redeploy:** Streamlit Community Cloud detects the GitHub commit and updates the hosted app.
+
+Redfin housing data is generally reported monthly. A weekly refresh checks for new data, but the reporting date will only advance when the source publishes a new period.
 
 ## Scoring Notes
 

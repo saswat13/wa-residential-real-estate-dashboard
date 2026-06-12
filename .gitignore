@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+.venv/
+
+# Keep the deployable county snapshot, but ignore larger optional caches.
+local_data/*
+!local_data/redfin_wa_county.parquet

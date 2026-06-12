@@ -127,7 +127,10 @@ with st.sidebar:
         else:
             st.caption(f"No local {level} data found.")
         refresh_clicked = st.button(f"Refresh {level} data", use_container_width=True)
-        st.caption("Refresh downloads the latest available public Redfin dataset.")
+        st.caption(
+            "Refresh downloads the latest public Redfin data for this app session. "
+            "County data is also refreshed weekly through GitHub."
+        )
 
 if refresh_clicked:
     with st.spinner(f"Downloading and caching {level} data. This may take a while..."):
@@ -283,6 +286,9 @@ with st.sidebar:
     )
 
 latest_available_date = raw_df[date_col].max()
+
+with st.sidebar:
+    st.caption(f"Housing data reported through **{latest_available_date:%B %d, %Y}**")
 
 months_lookup = {
     "Last 12 months": 12,
